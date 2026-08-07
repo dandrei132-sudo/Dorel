@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Automaton Control Panel</title>
+<meta name="theme-color" content="#0b0f14" />
+<link rel="manifest" href="/manifest.json" />
+<link rel="icon" href="/icons/icon-192.png" />
+<link rel="apple-touch-icon" href="/icons/icon-192.png" />
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+
+<div id="login-screen" class="screen">
+  <form id="login-form" class="login-card">
+    <h1>automaton</h1>
+    <p class="muted">Enter the control panel password to continue.</p>
+    <input id="login-password" type="password" placeholder="Password" autocomplete="current-password" required />
+    <button type="submit">Unlock</button>
+    <p id="login-error" class="error" hidden></p>
+  </form>
+</div>
+
+<div id="app-screen" class="screen" hidden>
+  <header class="topbar">
+    <div class="brand">
+      <span class="dot" id="conn-dot"></span>
+      <strong id="agent-name">automaton</strong>
+    </div>
+    <div class="tier-badge" id="tier-badge">—</div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button data-tab="dashboard" class="tab active">Dashboard</button>
+    <button data-tab="chat" class="tab">Chat</button>
+    <button data-tab="approvals" class="tab">Approvals <span id="approvals-count" class="badge" hidden>0</span></button>
+    <button data-tab="soul" class="tab">SOUL.md</button>
+    <button data-tab="lineage" class="tab">Lineage</button>
+    <button data-tab="skills" class="tab">Skills</button>
+    <button data-tab="logs" class="tab">Logs</button>
+  </nav>
+
+  <main>
+    <section id="tab-dashboard" class="tab-panel active">
+      <div class="cards">
+        <div class="card"><span class="label">Credits</span><span class="value" id="stat-credits">—</span></div>
+        <div class="card"><span class="label">Survival tier</span><span class="value" id="stat-tier">—</span></div>
+        <div class="card"><span class="label">Model</span><span class="value" id="stat-model">—</span></div>
+        <div class="card"><span class="label">Wallet balance</span><span class="value" id="stat-balance">—</span></div>
+      </div>
+      <div class="detail-block">
+        <h2>Identity</h2>
+        <dl id="identity-list" class="kv"></dl>
+      </div>
+      <div class="detail-block">
+        <h2>Controls</h2>
+        <div class="row">
+          <button id="btn-stop" class="secondary">Stop heartbeat</button>
+          <button id="btn-start" class="secondary">Start heartbeat</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-chat" class="tab-panel">
+      <div id="chat-log" class="chat-log"></div>
+      <form id="chat-form" class="chat-form">
+        <textarea id="chat-input" placeholder="Message the agent..." rows="2" required></textarea>
+        <button type="submit">Send</button>
+      </form>
+    </section>
+
+    <section id="tab-approvals" class="tab-panel">
+      <p class="muted">Financial/on-chain/replication actions the agent queued for approval. Nothing here executes until you approve it.</p>
+      <div id="approvals-list" class="list"></div>
+    </section>
+
+    <section id="tab-soul" class="tab-panel">
+      <pre id="soul-content" class="prose"></pre>
+    </section>
+
+    <section id="tab-lineage" class="tab-panel">
+      <div id="lineage-list" class="list"></div>
+    </section>
+
+    <section id="tab-skills" class="tab-panel">
+      <div id="skills-list" class="list"></div>
+    </section>
+
+    <section id="tab-logs" class="tab-panel">
+      <pre id="logs-content" class="prose mono"></pre>
+      <button id="btn-refresh-logs" class="secondary">Refresh</button>
+    </section>
+  </main>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

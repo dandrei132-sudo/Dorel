@@ -8,6 +8,7 @@ import { HeartbeatDaemon } from "./heartbeat/daemon.js";
 import { AgentLoop } from "./agent/loop.js";
 import { SkillRegistry } from "./skills/registry.js";
 import { runSetupWizard } from "./setup/wizard.js";
+import { startWebServer } from "./web/server.js";
 
 const program = new Command();
 
@@ -58,7 +59,25 @@ async function runAgent(): Promise<void> {
     anthropicApiKey: env.ANTHROPIC_API_KEY,
   });
 
+  const web = startWebServer({ config, conway, skills, heartbeat, loop });
+  console.log(`Control panel: http://${env.WEB_UI_HOST}:${env.WEB_UI_PORT}`);
+  if (web.generatedPassword) {
+    console.log(`Control panel password (generated, shown once): ${web.generatedPassword}`);
+    console.log(
+      "Set WEB_UI_PASSWORD to use your own instead. This one is stored (hashed) in ~/.automaton/web-auth.json.",
+    );
+  }
+
   console.log(`${config.name} is running. Executing genesis prompt...`);
-  const result = await loop.runTurn(config.genesisPrompt);
-  console.log(result);
+  try {
+    const result = await loop.runTurn(config.genesisPrompt);
+    console.log(result);
+  } catch (err) {
+    // The genesis turn failing (bad API key, network error, rate limit)
+    // shouldn't take the whole daemon down with it — the heartbeat and
+    // web control panel stay up so the operator can see what's wrong
+    // (e.g. via /api/logs or this stderr output) and retry from the chat
+    // tab once it's fixed, rather than needing to restart the process.
+    console.error(`Genesis turn failed: ${(err as Error).message}`);
+  }
 }

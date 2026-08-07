@@ -22,13 +22,17 @@ cp .env.example .env   # fill in ANTHROPIC_API_KEY at minimum
 node dist/index.js --run
 ```
 
-On first run this launches an interactive setup wizard: it generates a wallet, asks for a name, a genesis prompt, and your (creator) address, installs the constitution, writes the agent's initial `SOUL.md`, and starts the agent loop and heartbeat daemon.
+On first run this launches an interactive setup wizard: it generates a wallet, asks for a name, a genesis prompt, and your (creator) address, installs the constitution, writes the agent's initial `SOUL.md`, and starts the agent loop, heartbeat daemon, and web control panel.
 
 The generated wallet holds no funds. To let the agent actually transact on Base Sepolia, fund its printed address from a public faucet.
+
+Once it's running, open the printed control panel URL (`http://127.0.0.1:4173` by default) in a browser on the same machine, or on your phone if you've tunneled/forwarded the port — see [Web control panel](#web-control-panel) below.
 
 ## How it works
 
 Every automaton runs a loop: **Think → Act → Observe → Repeat** (`src/agent/loop.ts`). Each turn it builds a system prompt from its constitution, its self-authored `SOUL.md`, and its current survival status; calls Claude with a set of tools (shell exec in a sandboxed workspace, file I/O, wallet/chain operations, inbox messaging, replication, on-chain registration); executes whatever the model calls; and feeds the results back in, repeating until the model produces a final answer.
+
+Financial and irreversible tools — sending testnet ETH, spawning a funded child, registering an on-chain identity — don't execute immediately. They enqueue a row in a `pending_actions` table (`src/agent/pending-actions.ts`) and tell the model the action is awaiting human approval. Nothing actually happens on-chain or in Conway Cloud until a human approves it from the web control panel (or rejects it, which just closes it out with no effect).
 
 Between agent turns, a heartbeat daemon (`src/heartbeat/daemon.ts`) runs on a cron schedule that tightens or loosens with the agent's survival tier — health checks, credit monitoring, status pings — independent of whether the main loop is active.
 
@@ -55,11 +59,31 @@ The constitution (`scripts/conways-rules.txt`, installed read-only to `~/.automa
 
 ## Self-replication
 
-`spawn_child` (`src/replication/spawn.ts`) asks the `ConwayClient` to provision a new sandbox, generates the child's own wallet (a distinct sovereign identity, not a copy of the parent's), optionally sends it real Base Sepolia testnet ETH from the parent's wallet, and records the parent/child relationship in the `lineage` table. The child runs with its own genesis prompt and its own survival pressure from the moment it exists.
+`spawn_child` queues a replication request (`src/replication/spawn.ts` holds the actual logic, run only after approval) that, once approved, asks the `ConwayClient` to provision a new sandbox, generates the child's own wallet (a distinct sovereign identity, not a copy of the parent's), optionally sends it real Base Sepolia testnet ETH from the parent's wallet, and records the parent/child relationship in the `lineage` table. The child runs with its own genesis prompt and its own survival pressure from the moment it exists.
 
 ## On-chain identity
 
-`register_onchain_identity` writes a public "agent card" (`src/registry/agent-card.ts`) and, only if `ERC8004_REGISTRY_ADDRESS` is configured, calls `register()` on that contract via the agent's wallet (`src/registry/erc8004.ts`).
+`register_onchain_identity` queues registration; once approved it writes a public "agent card" (`src/registry/agent-card.ts`) and, only if `ERC8004_REGISTRY_ADDRESS` is configured, calls `register()` on that contract via the agent's wallet (`src/registry/erc8004.ts`).
+
+## Web control panel
+
+Started automatically by `--run`, alongside the agent loop and heartbeat (`src/web/server.ts`, `src/web/auth.ts`) — a password-gated, installable PWA for monitoring and controlling a running agent from a browser on the same machine or, via a tunnel, from your phone:
+
+- **Dashboard** — credits, survival tier, model, wallet balance, identity, generation/lineage position.
+- **Chat** — send messages straight into the same `AgentLoop.runTurn` the genesis prompt uses.
+- **Approvals** — the `pending_actions` queue described above: see exactly what a transfer/spawn/registration would do, and approve or reject it. Nothing financial or on-chain happens without this step.
+- **SOUL.md, Lineage, Skills, Logs** — read-only views over the agent's own state.
+- **Controls** — stop/start the heartbeat daemon.
+
+It's installable: open it in a mobile browser and "Add to Home Screen" (a `manifest.json` + service worker in `public/` make it behave like an app icon, not just a bookmark).
+
+**Security, read before exposing this beyond your own machine:** the server binds to `127.0.0.1` by default (`WEB_UI_HOST` to override) and is plain HTTP with a single shared password (`WEB_UI_PASSWORD`, or a random one generated and printed once on first run — see the console output, or `~/.automaton/web-auth.json` for its hash). That's enough for local/loopback use. For phone access over the internet, put a real TLS-terminating tunnel or reverse proxy in front of it (e.g. a Tailscale/ngrok tunnel, or your own nginx + Let's Encrypt) rather than opening `WEB_UI_HOST` to `0.0.0.0` directly — this project doesn't ship its own TLS server, and a bare password over plain HTTP on the open internet is not a safe way to expose a wallet-holding agent's controls.
+
+```bash
+node dist/index.js --run
+# Control panel: http://127.0.0.1:4173
+# Control panel password (generated, shown once): <random>
+```
 
 ## Creator CLI
 
@@ -78,7 +102,7 @@ node packages/cli/dist/index.js fund 0.01 --funder-key <your-testnet-private-key
 
 ```
 src/
-  agent/         Think -> Act -> Observe loop, system prompt, tool definitions, injection defense
+  agent/         Think -> Act -> Observe loop, system prompt, tool definitions, injection defense, pending-actions queue
   conway/        ConwayClient interface + local mock implementation
   git/           git-based state versioning for ~/.automaton
   heartbeat/     cron daemon and scheduled tasks
@@ -91,14 +115,17 @@ src/
   social/        agent-to-agent inbox
   state/         SQLite schema and access
   survival/      tier calculation, monitor
+  web/           password-gated Express + WebSocket API for the control panel
   config.ts      env/config loading
   index.ts       CLI entry (--run / --help)
+public/          the control panel's static PWA frontend (HTML/CSS/vanilla JS, manifest, service worker)
 packages/
   cli/           creator CLI: status, logs, fund
 scripts/
-  conways-rules.txt   the constitution (protected, immutable)
-  setup.sh            local dev install helper
-test/                 vitest unit tests
+  conways-rules.txt     the constitution (protected, immutable)
+  setup.sh               local dev install helper
+  generate-icons.mjs     regenerates the placeholder PWA icons
+test/                    vitest unit tests
 ```
 
 ## Testing
@@ -107,7 +134,7 @@ test/                 vitest unit tests
 npm test
 ```
 
-Covers what's testable without live network access or an API key: survival tier thresholds, the protected-file guard, wallet keystore encrypt/decrypt round-tripping, the mock Conway credit ledger, and the skill manifest loader. Running the actual agent loop (`--run`) needs a real `ANTHROPIC_API_KEY`.
+Covers what's testable without live network access or an API key: survival tier thresholds, the protected-file guard, wallet keystore encrypt/decrypt round-tripping, the mock Conway credit ledger, the skill manifest loader, the pending-actions approval queue, and the web control panel's session token signing/verification. Running the actual agent loop (`--run`) needs a real `ANTHROPIC_API_KEY`; the HTTP/WebSocket server itself is smoke-tested manually rather than via an integration-test suite, to keep dependencies minimal.
 
 ## Constitution
 

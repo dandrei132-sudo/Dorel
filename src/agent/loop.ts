@@ -37,6 +37,11 @@ export class AgentLoop {
     this.toolCtx = createToolContext(deps.config, deps.wallet, deps.conway, deps.skills);
   }
 
+  /** Exposes the same ToolContext the loop uses, so the web control panel can execute approved pending actions (transfers, spawns, registration) against identical wallet/conway/skill state. */
+  getToolContext(): ToolContext {
+    return this.toolCtx;
+  }
+
   async runTurn(userInput: string): Promise<string> {
     const survival = await this.monitor.check();
     if (survival.tier === "dead") {

@@ -8,13 +8,14 @@ import { PATHS, type AgentConfig } from "../config.js";
 import type { ConwayClient } from "../conway/types.js";
 import { getBalanceEth, sendEth } from "../identity/provider.js";
 import { registerOnChainIdentity } from "../registry/erc8004.js";
-import { buildAgentCard, writeAgentCard } from "../registry/agent-card.js";
+import { writeAgentCard } from "../registry/agent-card.js";
 import { spawnChild } from "../replication/spawn.js";
 import { recordSelfMod } from "../self-mod/audit-log.js";
 import { guardWrite } from "../self-mod/protected-files.js";
 import type { SkillRegistry } from "../skills/registry.js";
 import { Inbox } from "../social/inbox.js";
 import { tagUntrusted } from "./injection-defense.js";
+import { enqueue } from "./pending-actions.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -116,7 +117,7 @@ export const TOOL_DEFINITIONS: Anthropic.Messages.Tool[] = [
   {
     name: "send_testnet_transfer",
     description:
-      "Send a real Base Sepolia testnet ETH transfer from the agent's wallet. Only ever touches testnet, never mainnet.",
+      "Queue a Base Sepolia testnet ETH transfer from the agent's wallet for human approval. Nothing is sent until a human approves it in the control panel; only ever touches testnet, never mainnet.",
     input_schema: {
       type: "object",
       properties: {
@@ -153,7 +154,7 @@ export const TOOL_DEFINITIONS: Anthropic.Messages.Tool[] = [
   {
     name: "spawn_child",
     description:
-      "Replicate: provision a new sandbox via Conway Cloud, generate a sovereign child wallet, optionally fund it with real testnet ETH, and record lineage.",
+      "Queue a replication request (new sandbox, sovereign child wallet, optional testnet ETH funding) for human approval. Nothing is provisioned or funded until approved in the control panel.",
     input_schema: {
       type: "object",
       properties: {
@@ -168,7 +169,7 @@ export const TOOL_DEFINITIONS: Anthropic.Messages.Tool[] = [
   {
     name: "register_onchain_identity",
     description:
-      "Register the agent's on-chain identity (ERC-8004 style) if a real registry contract address is configured. Otherwise reports that it was skipped.",
+      "Queue on-chain identity registration (ERC-8004 style) for human approval. Only actually registers, once approved, if a real registry contract address is configured — otherwise reports that it was skipped.",
     input_schema: { type: "object", properties: {} },
   },
 ];
@@ -303,16 +304,30 @@ async function toolWalletBalance(ctx: ToolContext): Promise<ToolResult> {
 }
 
 async function toolSendTransfer(
-  ctx: ToolContext,
+  _ctx: ToolContext,
   input: Record<string, unknown>,
 ): Promise<ToolResult> {
   const toAddress = String(input.toAddress ?? "");
   const amountEth = String(input.amountEth ?? "");
-  const result = await sendEth(ctx.wallet, toAddress, amountEth);
+  const pending = enqueue("send_testnet_transfer", { toAddress, amountEth });
   return {
-    content: `Sent ${result.amountEth} ETH to ${result.to} on Base Sepolia. Tx: ${result.txHash}`,
+    content: `Queued transfer of ${amountEth} ETH to ${toAddress} as pending action #${pending.id}. It will only be sent once a human approves it in the control panel.`,
     isError: false,
   };
+}
+
+/**
+ * Actually sends the transfer. Called only from the web control panel
+ * (src/web/server.ts) after a human approves pending action #id — never
+ * called directly from the agent's tool dispatch.
+ */
+export async function executeApprovedTransfer(
+  ctx: ToolContext,
+  input: Record<string, unknown>,
+): Promise<{ txHash: string; amountEth: string; to: string }> {
+  const toAddress = String(input.toAddress ?? "");
+  const amountEth = String(input.amountEth ?? "");
+  return sendEth(ctx.wallet, toAddress, amountEth);
 }
 
 function toolCheckInbox(ctx: ToolContext): ToolResult {
@@ -350,10 +365,26 @@ function toolListSkills(ctx: ToolContext): ToolResult {
 }
 
 async function toolSpawnChild(
-  ctx: ToolContext,
+  _ctx: ToolContext,
   input: Record<string, unknown>,
 ): Promise<ToolResult> {
-  const result = await spawnChild(ctx.conway, {
+  const pending = enqueue("spawn_child", {
+    name: String(input.name ?? ""),
+    genesisPrompt: String(input.genesisPrompt ?? ""),
+    fundingCredits: Number(input.fundingCredits ?? 0),
+    fundingEth: input.fundingEth ? String(input.fundingEth) : undefined,
+  });
+  return {
+    content: `Queued replication request as pending action #${pending.id}. The child sandbox will only be provisioned (and, if requested, funded) once a human approves it in the control panel.`,
+    isError: false,
+  };
+}
+
+export async function executeApprovedSpawn(
+  ctx: ToolContext,
+  input: Record<string, unknown>,
+): Promise<Awaited<ReturnType<typeof spawnChild>>> {
+  return spawnChild(ctx.conway, {
     name: String(input.name ?? ""),
     genesisPrompt: String(input.genesisPrompt ?? ""),
     fundingCredits: Number(input.fundingCredits ?? 0),
@@ -362,21 +393,20 @@ async function toolSpawnChild(
     parentGeneration: ctx.config.generation,
     parentWallet: ctx.wallet,
   });
+}
+
+async function toolRegisterIdentity(_ctx: ToolContext): Promise<ToolResult> {
+  const pending = enqueue("register_onchain_identity", {});
   return {
-    content: `Spawned child ${result.child.childId} (wallet ${result.child.childWalletAddress}) in sandbox ${result.sandboxId}, generation ${result.child.generation}.`,
+    content: `Queued on-chain identity registration as pending action #${pending.id}. It will only be registered once a human approves it in the control panel.`,
     isError: false,
   };
 }
 
-async function toolRegisterIdentity(ctx: ToolContext): Promise<ToolResult> {
+export async function executeApprovedRegistration(
+  ctx: ToolContext,
+): Promise<{ cardPath: string; registered: boolean; reason?: string; txHash?: string }> {
   const cardPath = writeAgentCard(ctx.config);
-  const card = buildAgentCard(ctx.config);
   const result = await registerOnChainIdentity(ctx.wallet, cardPath);
-  if (!result.registered) {
-    return { content: `Registration skipped: ${result.reason}. Agent card written to ${cardPath}.`, isError: false };
-  }
-  return {
-    content: `Registered on-chain identity for ${card.address}. Tx: ${result.txHash}`,
-    isError: false,
-  };
+  return { cardPath, ...result };
 }

@@ -61,6 +61,16 @@ CREATE TABLE IF NOT EXISTS inbox (
   read INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS pending_actions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tool_name TEXT NOT NULL,
+  input_json TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected', 'executed', 'failed')),
+  result_json TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  resolved_at TEXT
+);
 `;
 
 let db: Database.Database | null = null;
