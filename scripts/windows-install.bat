@@ -1,127 +1,138 @@
 @echo off
 setlocal enabledelayedexpansion
-title Automaton - Instalare si pornire
+title Automaton - instalare
 color 0B
 
-echo ===================================================
-echo   Automaton - instalare si pornire automata
-echo ===================================================
+echo.
+echo   ================================================
+echo    AUTOMATON - se instaleaza si porneste singur
+echo   ================================================
+echo.
+echo   Nu trebuie sa faci nimic altceva decat sa astepti
+echo   si sa raspunzi la intrebari cand apar. Poate dura
+echo   cateva minute.
 echo.
 
-rem --- Verifica winget (necesar pentru instalare automata Git/Node) ---
+set "NEED_RESTART=0"
+
 where winget >nul 2>nul
 if errorlevel 1 (
-    echo [!] Nu am gasit "winget" pe acest calculator.
-    echo     Instaleaza manual Git (https://git-scm.com/download/win^)
-    echo     si Node.js (https://nodejs.org^), apoi ruleaza din nou acest fisier.
+    echo   [EROARE] Acest calculator are nevoie de o actualizare Windows
+    echo   ca sa poata instala programe automat.
+    echo   Deschide Settings, cauta "Windows Update", instaleaza
+    echo   actualizarile disponibile, apoi porneste din nou acest fisier.
     pause
     exit /b 1
 )
 
-rem --- Verifica / instaleaza Git ---
 where git >nul 2>nul
 if errorlevel 1 (
-    echo [1/6] Git nu este instalat. Se instaleaza automat...
+    echo   [1/5] Instalez Git ^(o singura data, dureaza putin^)...
     winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements
-    if errorlevel 1 (
-        echo [!] Instalarea automata a Git a esuat. Instaleaza manual de pe https://git-scm.com/download/win
-        pause
-        exit /b 1
-    )
-    echo.
-    echo [OK] Git a fost instalat. Trebuie sa inchid aceasta fereastra ca sistemul
-    echo      sa recunoasca noua comanda. Deschide din nou acest fisier (dublu-click^)
-    echo      ca sa continui instalarea.
-    pause
-    exit /b 0
+    set "NEED_RESTART=1"
+) else (
+    echo   [1/5] Git: deja instalat
 )
-echo [1/6] Git: OK
 
-rem --- Verifica / instaleaza Node.js ---
 where node >nul 2>nul
 if errorlevel 1 (
-    echo [2/6] Node.js nu este instalat. Se instaleaza automat...
+    echo   [2/5] Instalez Node.js ^(o singura data, dureaza putin^)...
     winget install --id OpenJS.NodeJS.LTS -e --source winget --accept-package-agreements --accept-source-agreements
-    if errorlevel 1 (
-        echo [!] Instalarea automata a Node.js a esuat. Instaleaza manual de pe https://nodejs.org
-        pause
-        exit /b 1
-    )
+    set "NEED_RESTART=1"
+) else (
+    echo   [2/5] Node.js: deja instalat
+)
+
+if "%NEED_RESTART%"=="1" (
     echo.
-    echo [OK] Node.js a fost instalat. Trebuie sa inchid aceasta fereastra ca sistemul
-    echo      sa recunoasca noua comanda. Deschide din nou acest fisier (dublu-click^)
-    echo      ca sa continui instalarea.
+    echo   ================================================
+    echo    UN SINGUR PAS MAI AI DE FACUT ACUM:
+    echo   ================================================
+    echo.
+    echo   1. Inchide COMPLET aceasta fereastra ^(X din coltul din dreapta sus^)
+    echo   2. Cauta din nou fisierul de instalare si fa dublu-click pe el
+    echo.
+    echo   Asta e tot - de data asta va continua singur pana la capat,
+    echo   fara sa te mai opreasca aici.
+    echo.
     pause
     exit /b 0
 )
-echo [2/6] Node.js: OK
 
-rem --- Ia / actualizeaza codul aplicatiei ---
+echo   [3/5] Descarc / actualizez aplicatia...
 cd /d "%USERPROFILE%"
 if exist Dorel (
-    echo [3/6] Actualizez aplicatia existenta...
     cd Dorel
-    git checkout claude/automaton-self-improving-ai-nlseal
+    git checkout claude/automaton-self-improving-ai-nlseal >nul 2>nul
     git pull origin claude/automaton-self-improving-ai-nlseal
 ) else (
-    echo [3/6] Descarc aplicatia...
     git clone https://github.com/dandrei132-sudo/Dorel.git
     if errorlevel 1 (
-        echo [!] Descarcarea a esuat. Verifica conexiunea la internet si incearca din nou.
+        echo.
+        echo   [EROARE] Descarcarea nu a mers. Verifica ca esti conectat la
+        echo   internet, apoi porneste din nou acest fisier.
         pause
         exit /b 1
     )
     cd Dorel
-    git checkout claude/automaton-self-improving-ai-nlseal
+    git checkout claude/automaton-self-improving-ai-nlseal >nul 2>nul
 )
+echo   [3/5] Aplicatia: gata
 
-rem --- Instaleaza dependintele ---
-echo [4/6] Instalez componentele necesare (poate dura 1-2 minute)...
-call npm install
-if errorlevel 1 (
-    echo [!] A aparut o eroare la instalare. Trimite mesajul de mai sus.
-    pause
-    exit /b 1
-)
+echo   [4/5] Pregatesc aplicatia ^(poate dura 1-2 minute, e normal^)...
+call npm install >install.log 2>&1
+if errorlevel 1 goto :preperr
+call npm run build >>install.log 2>&1
+if errorlevel 1 goto :preperr
+echo   [4/5] Aplicatia: pregatita
+goto :envcheck
 
-rem --- Construieste aplicatia ---
-echo [5/6] Construiesc aplicatia...
-call npm run build
-if errorlevel 1 (
-    echo [!] A aparut o eroare la construire. Trimite mesajul de mai sus.
-    pause
-    exit /b 1
-)
+:preperr
+echo.
+echo   [EROARE] Ceva nu a mers la pregatirea aplicatiei.
+echo   In folderul Dorel s-a creat un fisier "install.log" -
+echo   deschide-l, copiaza tot ce scrie in el si trimite-mi mie.
+pause
+exit /b 1
 
-rem --- Configureaza cheia Anthropic, daca lipseste ---
-if not exist .env (
-    copy .env.example .env >nul
-)
+:envcheck
+if not exist .env copy .env.example .env >nul
 set "AK="
 for /f "usebackq tokens=1,* delims==" %%A in (`findstr /b "ANTHROPIC_API_KEY=" .env`) do set "AK=%%B"
 if not "!AK!"=="" goto :haskey
 
 echo.
-echo ===================================================
-echo   Mai ai nevoie de UN singur lucru: o cheie Anthropic.
-echo   Iti apar acum fisierul de configurare si pagina unde
-echo   iti faci gratuit o cheie, daca nu ai deja una.
-echo ===================================================
+echo   ================================================
+echo    [5/5] Ultimul lucru: o cheie gratuita de la Anthropic
+echo   ================================================
+echo.
+echo   Acum se deschid doua ferestre:
+echo     - o pagina web, unde apesi butonul "Create Key" si o copiezi
+echo     - un fisier de Notepad, unde o lipesti
+echo.
+echo   In Notepad, pe randul care incepe cu ANTHROPIC_API_KEY=
+echo   lipeste cheia chiar dupa semnul =, apoi Salveaza ^(Ctrl+S^)
+echo   si inchide Notepad.
+echo.
+pause
 start "" "https://console.anthropic.com/settings/keys"
 notepad .env
 echo.
-echo Dupa ce ai salvat cheia in fisier (linia ANTHROPIC_API_KEY=...^),
-echo ruleaza din nou acest fisier ca sa pornesti aplicatia.
+echo   Gata cu cheia? Inchide aceasta fereastra si fa din nou
+echo   dublu-click pe fisierul de instalare ca sa pornesti aplicatia.
 pause
 exit /b 0
 
 :haskey
-rem --- Porneste aplicatia ---
-echo [6/6] Pornesc aplicatia...
 echo.
-echo Cand vezi "Control panel: http://127.0.0.1:4173" si o parola,
-echo deschide acel link intr-un browser si intra cu parola afisata.
+echo   ================================================
+echo    Aplicatia porneste acum. NU inchide fereastra asta!
+echo   ================================================
+echo.
+echo   Cand vezi mai jos o linie ca aceasta:
+echo       Control panel: http://127.0.0.1:4173
+echo   si o parola langa ea - deschide acel link intr-un
+echo   browser normal ^(Chrome/Edge^) si intra cu parola aia.
 echo.
 node dist\index.js --run
-
 pause
