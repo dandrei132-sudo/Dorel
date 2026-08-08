@@ -116,7 +116,7 @@
     try {
       const { config, survival, walletBalanceEth } = await api("/status");
       applySurvival(survival);
-      $("#stat-balance").textContent = `${walletBalanceEth} ETH`;
+      $("#stat-balance").textContent = walletBalanceEth === null ? "unavailable" : `${walletBalanceEth} ETH`;
       $("#agent-name").textContent = config.name;
       const identity = $("#identity-list");
       identity.innerHTML = "";

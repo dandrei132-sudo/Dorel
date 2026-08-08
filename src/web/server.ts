@@ -126,7 +126,17 @@ export function startWebServer(deps: WebServerDeps): WebServerHandle {
 
   api.get("/status", async (_req, res) => {
     const survival = await monitor.check();
-    const balanceEth = await getBalanceEth(toolCtx.wallet.address);
+    // Wallet balance needs a live RPC call to Base Sepolia, which can
+    // fail (network hiccup, RPC outage) independently of everything
+    // else here — that shouldn't take down survival/identity data the
+    // UI can show regardless, so it degrades to null instead of
+    // failing the whole request.
+    let balanceEth: string | null = null;
+    try {
+      balanceEth = await getBalanceEth(toolCtx.wallet.address);
+    } catch (err) {
+      console.error(`/api/status: wallet balance fetch failed: ${(err as Error).message}`);
+    }
     res.json({
       config: deps.config,
       survival,
