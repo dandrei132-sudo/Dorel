@@ -1,0 +1,8 @@
+{
+  "name": "example-echo",
+  "version": "0.1.0",
+  "description": "Reference skill manifest showing the expected shape. Not auto-loaded from the repo — copy a skill directory into ~/.automaton/skills (or set AUTOMATON_HOME) to have the runtime load it via SkillRegistry.loadFrom().",
+  "entrypoint": "none",
+  "estimatedCostCredits": 0,
+  "tags": ["example"]
+}

@@ -1,0 +1,15 @@
+{
+  "name": "@automaton/cli",
+  "version": "0.1.0",
+  "description": "Creator CLI for inspecting and funding a running Automaton agent.",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "automaton-cli": "dist/index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "commander": "^12.1.0",
+    "ethers": "^6.13.5"
+  }
+}
