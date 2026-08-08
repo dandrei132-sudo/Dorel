@@ -15,6 +15,10 @@ This matters more than usual for a project like this, so it's stated plainly:
 
 ## Quick start
 
+**Windows, no command line needed:** download [`scripts/windows-install.bat`](scripts/windows-install.bat) (right-click the Raw button on GitHub → "Save link as") and double-click it. It installs Git and Node.js if they're missing (via `winget`), clones/updates the app, builds it, prompts for an Anthropic API key on first run, and starts it. Windows will show a SmartScreen warning since it's an unsigned script downloaded from the internet — click "More info" → "Run anyway". Re-run the same file any time to update and restart.
+
+Everything else (macOS/Linux, or if you'd rather run the commands yourself on Windows):
+
 ```bash
 npm install
 npm run build
