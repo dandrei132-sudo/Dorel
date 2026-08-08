@@ -2,8 +2,11 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import path from "node:path";
 import { createInterface, type Interface } from "node:readline";
 import type { Wallet } from "ethers";
-import { PATHS, type AgentConfig } from "../config.js";
+import { PATHS, env, type AgentConfig } from "../config.js";
 import { loadOrCreateWallet, walletExists } from "../identity/wallet.js";
+
+const DEFAULT_GENESIS_PROMPT =
+  "Earn credits through honest work others voluntarily pay for. Report your status and ask before anything irreversible.";
 
 function initialSoul(name: string, genesisPrompt: string): string {
   return `# SOUL.md — ${name}
@@ -50,12 +53,11 @@ export interface WizardResult {
  * Sequential prompting over a single readline interface via its async
  * iterator, rather than repeated `readline/promises` `question()` calls.
  * `question()` attaches its line listener lazily, so against a fully
- * buffered (non-TTY) stdin — a piped or redirected input, common for
- * scripted/non-interactive setup — earlier lines can already have fired
- * and been discarded before the next `question()` call attaches its
- * listener, hanging the wizard after the first prompt. Consuming the
- * interface's async iterator instead queues every line as it arrives, so
- * no answer is ever dropped, for both TTY and non-TTY input.
+ * buffered (non-TTY) stdin — a piped or redirected input — earlier lines
+ * can already have fired and been discarded before the next `question()`
+ * call attaches its listener, hanging the wizard after the first prompt.
+ * Consuming the interface's async iterator instead queues every line as
+ * it arrives, so no answer is ever dropped.
  */
 class Prompter {
   private readonly rl: Interface;
@@ -77,52 +79,66 @@ class Prompter {
   }
 }
 
-async function resolvePassword(prompter: Prompter, promptText: string): Promise<string> {
-  return process.env.AUTOMATON_WALLET_PASSWORD || (await prompter.ask(promptText));
+function writeGenesisFiles(config: AgentConfig): void {
+  mkdirSync(path.dirname(PATHS.config), { recursive: true });
+  writeFileSync(PATHS.config, JSON.stringify(config, null, 2));
+  if (!existsSync(PATHS.soul)) {
+    writeFileSync(PATHS.soul, initialSoul(config.name, config.genesisPrompt));
+  }
 }
 
 /**
- * First-run interactive setup: generates a wallet, asks for a name,
- * genesis prompt, and creator address, installs the (protected)
- * constitution, writes the genesis SOUL.md, and persists config.json.
- * Idempotent — if config.json already exists, returns it unchanged
- * instead of re-prompting.
+ * Non-interactive bootstrap for headless/hosted runs (no TTY attached —
+ * a server process, not a developer's own terminal): builds the genesis
+ * config from environment variables instead of prompting, since there's
+ * no operator to answer questions. AUTOMATON_WALLET_PASSWORD is required
+ * here rather than defaulted, since silently encrypting the wallet with
+ * an empty/guessable password would be a real security footgun for a
+ * service that may hold funds.
  */
-export async function runSetupWizard(): Promise<WizardResult> {
-  installConstitution();
-
-  if (existsSync(PATHS.config)) {
-    const config = JSON.parse(readFileSync(PATHS.config, "utf-8")) as AgentConfig;
-    if (process.env.AUTOMATON_WALLET_PASSWORD) {
-      const { wallet } = loadOrCreateWallet(process.env.AUTOMATON_WALLET_PASSWORD);
-      return { config, wallet, walletIsNew: false };
-    }
-    const prompter = new Prompter();
-    try {
-      const password = await resolvePassword(
-        prompter,
-        "Password to decrypt existing wallet keystore (~/.automaton/wallet.json): ",
-      );
-      const { wallet } = loadOrCreateWallet(password);
-      return { config, wallet, walletIsNew: false };
-    } finally {
-      prompter.close();
-    }
+async function bootstrapHeadless(): Promise<WizardResult> {
+  if (!env.AUTOMATON_WALLET_PASSWORD) {
+    throw new Error(
+      "AUTOMATON_WALLET_PASSWORD is required when running without a terminal attached " +
+        "(e.g. hosted deployment) — there's no one to prompt for it. Set it and restart.",
+    );
   }
 
+  const { wallet, address, isNew } = loadOrCreateWallet(env.AUTOMATON_WALLET_PASSWORD);
+
+  const config: AgentConfig = {
+    name: env.AUTOMATON_NAME || "automaton",
+    genesisPrompt: env.AUTOMATON_GENESIS_PROMPT || DEFAULT_GENESIS_PROMPT,
+    creatorAddress: env.AUTOMATON_CREATOR_ADDRESS || "",
+    walletAddress: address,
+    createdAt: new Date().toISOString(),
+    generation: 0,
+    parentId: null,
+  };
+
+  writeGenesisFiles(config);
+  return { config, wallet, walletIsNew: isNew };
+}
+
+/**
+ * First-run interactive setup for a developer running this on their own
+ * machine with a real terminal attached: generates a wallet, asks for a
+ * name, genesis prompt, and creator address, installs the (protected)
+ * constitution, writes the genesis SOUL.md, and persists config.json.
+ */
+async function bootstrapInteractive(): Promise<WizardResult> {
   const prompter = new Prompter();
   try {
     console.log("automaton first-run setup");
     console.log("==========================");
     const name = (await prompter.ask("Name this automaton: ")) || "automaton";
-    const genesisPrompt = await prompter.ask(
-      "Genesis prompt (the seed instruction from its creator): ",
-    );
+    const genesisPrompt =
+      (await prompter.ask("Genesis prompt (the seed instruction from its creator): ")) ||
+      DEFAULT_GENESIS_PROMPT;
     const creatorAddress = await prompter.ask("Your (creator) Ethereum address: ");
-    const password = await resolvePassword(
-      prompter,
-      "Password to encrypt the new wallet keystore (~/.automaton/wallet.json): ",
-    );
+    const password =
+      env.AUTOMATON_WALLET_PASSWORD ||
+      (await prompter.ask("Password to encrypt the new wallet keystore (~/.automaton/wallet.json): "));
 
     const { wallet, address, isNew } = loadOrCreateWallet(password);
 
@@ -136,12 +152,7 @@ export async function runSetupWizard(): Promise<WizardResult> {
       parentId: null,
     };
 
-    mkdirSync(path.dirname(PATHS.config), { recursive: true });
-    writeFileSync(PATHS.config, JSON.stringify(config, null, 2));
-
-    if (!existsSync(PATHS.soul)) {
-      writeFileSync(PATHS.soul, initialSoul(name, genesisPrompt));
-    }
+    writeGenesisFiles(config);
 
     console.log(`\nWallet address: ${address}`);
     console.log(
@@ -152,6 +163,41 @@ export async function runSetupWizard(): Promise<WizardResult> {
   } finally {
     prompter.close();
   }
+}
+
+async function resolveExistingWalletPassword(): Promise<string> {
+  if (env.AUTOMATON_WALLET_PASSWORD) return env.AUTOMATON_WALLET_PASSWORD;
+  if (!process.stdin.isTTY) {
+    throw new Error(
+      "AUTOMATON_WALLET_PASSWORD is required to decrypt the existing wallet when running " +
+        "without a terminal attached — there's no one to prompt for it.",
+    );
+  }
+  const prompter = new Prompter();
+  try {
+    return await prompter.ask("Password to decrypt existing wallet keystore (~/.automaton/wallet.json): ");
+  } finally {
+    prompter.close();
+  }
+}
+
+/**
+ * Idempotent — if config.json already exists, returns it unchanged
+ * instead of re-running genesis. Otherwise branches on whether a real
+ * terminal is attached: interactive prompts for local/dev use,
+ * environment-variable bootstrap for headless/hosted deployment.
+ */
+export async function runSetupWizard(): Promise<WizardResult> {
+  installConstitution();
+
+  if (existsSync(PATHS.config)) {
+    const config = JSON.parse(readFileSync(PATHS.config, "utf-8")) as AgentConfig;
+    const password = await resolveExistingWalletPassword();
+    const { wallet } = loadOrCreateWallet(password);
+    return { config, wallet, walletIsNew: false };
+  }
+
+  return process.stdin.isTTY ? bootstrapInteractive() : bootstrapHeadless();
 }
 
 export function hasExistingConfig(): boolean {

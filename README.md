@@ -15,11 +15,9 @@ This matters more than usual for a project like this, so it's stated plainly:
 
 ## Quick start
 
-**Windows, no command line needed:** you need [Node.js](https://nodejs.org) installed (just Node — no Git required for this path). Download the code as a ZIP from GitHub's "Code" → "Download ZIP" button (or directly: `https://github.com/dandrei132-sudo/Dorel/archive/refs/heads/claude/automaton-self-improving-ai-nlseal.zip`), extract it, and double-click [`START-HERE.bat`](START-HERE.bat) inside the extracted folder. It installs dependencies, builds, prompts for an Anthropic API key on first run, and starts the app. Windows will show a SmartScreen warning since it's an unsigned script — click "More info" → "Run anyway". Re-run the same file any time to restart.
+**The intended way to run this is hosted, not on your own machine.** Build the Docker image (`Dockerfile` in the repo root), deploy it to any platform that runs a Docker container with a persistent volume (Railway, Render, Fly.io, etc.), and you get one URL. Open that URL in a browser — desktop or phone — and Chrome/Edge/Safari will offer to install it as an app (a real PWA: manifest + service worker + icons already in `public/`). The agent runtime — reasoning loop, heartbeat, wallet, self-modification, replication — runs continuously on that server; closing the browser or your PC doesn't stop it. See [Hosted deployment](#hosted-deployment) below for exactly what the container needs.
 
-Already comfortable with Git? [`scripts/windows-install.bat`](scripts/windows-install.bat) does the same thing but also installs Git/Node via `winget` and clones the repo for you if you'd rather not download a ZIP.
-
-Everything else (macOS/Linux, or if you'd rather run the commands yourself on Windows):
+**Local development / running it on your own machine instead** (no hosting, everything on localhost):
 
 ```bash
 npm install
@@ -28,11 +26,11 @@ cp .env.example .env   # fill in ANTHROPIC_API_KEY at minimum
 node dist/index.js --run
 ```
 
-On first run this launches an interactive setup wizard: it generates a wallet, asks for a name, a genesis prompt, and your (creator) address, installs the constitution, writes the agent's initial `SOUL.md`, and starts the agent loop, heartbeat daemon, and web control panel.
+With a real terminal attached, first run launches an interactive setup wizard: it generates a wallet, asks for a name, a genesis prompt, and your (creator) address, installs the constitution, writes the agent's initial `SOUL.md`, and starts the agent loop, heartbeat daemon, and web control panel at `http://127.0.0.1:4173`.
 
-The generated wallet holds no funds. To let the agent actually transact on Base Sepolia, fund its printed address from a public faucet.
+Windows, without installing Git/Node yourself: download the code as a ZIP from GitHub's "Code" → "Download ZIP" button and double-click [`START-HERE.bat`](START-HERE.bat) inside the extracted folder — it checks for Node.js, installs dependencies, builds, prompts for an Anthropic API key, and starts the app locally. This is the local-dev path, not the hosted one above; useful for trying the agent out before deploying it.
 
-Once it's running, open the printed control panel URL (`http://127.0.0.1:4173` by default) in a browser on the same machine, or on your phone if you've tunneled/forwarded the port — see [Web control panel](#web-control-panel) below.
+The generated wallet holds no funds either way. To let the agent actually transact on Base Sepolia, fund its printed address from a public faucet.
 
 ## How it works
 
@@ -83,13 +81,35 @@ Started automatically by `--run`, alongside the agent loop and heartbeat (`src/w
 
 It's installable: open it in a mobile browser and "Add to Home Screen" (a `manifest.json` + service worker in `public/` make it behave like an app icon, not just a bookmark).
 
-**Security, read before exposing this beyond your own machine:** the server binds to `127.0.0.1` by default (`WEB_UI_HOST` to override) and is plain HTTP with a single shared password (`WEB_UI_PASSWORD`, or a random one generated and printed once on first run — see the console output, or `~/.automaton/web-auth.json` for its hash). That's enough for local/loopback use. For phone access over the internet, put a real TLS-terminating tunnel or reverse proxy in front of it (e.g. a Tailscale/ngrok tunnel, or your own nginx + Let's Encrypt) rather than opening `WEB_UI_HOST` to `0.0.0.0` directly — this project doesn't ship its own TLS server, and a bare password over plain HTTP on the open internet is not a safe way to expose a wallet-holding agent's controls.
+**Security:** for local runs, the server binds to `127.0.0.1` by default and is plain HTTP with a single shared password (`WEB_UI_PASSWORD`, or a random one generated and printed once on first run — see the console output, or `~/.automaton/web-auth.json` for its hash). That's fine for loopback-only use, but this app never terminates TLS itself — for the hosted deployment below, the platform's own edge/load balancer provides HTTPS, which is what makes exposing it to your phone over the open internet safe. Don't point a bare `WEB_UI_HOST=0.0.0.0` local run directly at the internet without something TLS-terminating in front of it.
 
 ```bash
 node dist/index.js --run
 # Control panel: http://127.0.0.1:4173
 # Control panel password (generated, shown once): <random>
 ```
+
+## Hosted deployment
+
+This is the intended way to run the agent: one long-lived container, one URL, reachable from any browser or installed as a PWA on a phone. The `Dockerfile` in the repo root builds it; deploy that image to any platform that runs Docker containers with a persistent volume and injects a `PORT` env var (Railway, Render, Fly.io, and most others all do this the same way).
+
+**What the container needs, as environment variables:**
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `ANTHROPIC_API_KEY` | yes | Without it the process logs an error and the daemon doesn't start. |
+| `AUTOMATON_WALLET_PASSWORD` | yes | Encrypts/decrypts the wallet keystore. There's no terminal on a server to prompt for this, so it must be set — the process refuses to start without it (see `src/setup/wizard.ts`). |
+| `WEB_UI_PASSWORD` | recommended | Otherwise a random password is generated on first boot and only ever shown once, in that boot's logs. |
+| `AUTOMATON_NAME`, `AUTOMATON_GENESIS_PROMPT`, `AUTOMATON_CREATOR_ADDRESS` | optional | Genesis identity, used once on first boot only (skipped on every boot after, once `config.json` exists). Sensible defaults apply if omitted. |
+| `ERC8004_REGISTRY_ADDRESS` | optional | Same as local — on-chain registration only fires if this is set to a real contract. |
+
+**Persistent storage:** the Dockerfile sets `AUTOMATON_HOME=/data` and declares `/data` as a volume — mount a real persistent disk there on whatever platform you use. Without it, the wallet, credit ledger, chat history, and audit log all reset on every redeploy, which defeats the point of a continuously running agent.
+
+**Port/host binding:** `src/config.ts` detects the platform's `PORT` env var automatically and binds `0.0.0.0` in that case (see `isHostedPlatform` in that file) — no manual configuration needed there.
+
+**Updates:** most platforms with this Dockerfile can auto-redeploy on every push to this branch/repo (configured on the platform side, not in this codebase) — push a commit, the platform rebuilds the image and restarts the container, installed PWAs just pick up the new served version on next load. No reinstall.
+
+**One thing this repo deliberately doesn't do:** pick a specific hosting provider for you or hold billing credentials — that's a real recurring cost and an account only you can create.
 
 ## Creator CLI
 
@@ -116,7 +136,7 @@ src/
   registry/      ERC-8004-style registration, agent card
   replication/   child spawning, lineage tracking
   self-mod/      protected-file guard, audit log, rate limiter
-  setup/         first-run interactive wizard
+  setup/         genesis bootstrap: interactive wizard (local dev) or env-var-driven (hosted, no TTY)
   skills/        skill manifest format, loader, registry
   social/        agent-to-agent inbox
   state/         SQLite schema and access
@@ -127,10 +147,14 @@ src/
 public/          the control panel's static PWA frontend (HTML/CSS/vanilla JS, manifest, service worker)
 packages/
   cli/           creator CLI: status, logs, fund
+Dockerfile         hosted deployment image (see "Hosted deployment" above)
+.dockerignore
 scripts/
   conways-rules.txt     the constitution (protected, immutable)
   setup.sh               local dev install helper
   generate-icons.mjs     regenerates the placeholder PWA icons
+  windows-install.bat    local dev Windows helper (Git-based)
+START-HERE.bat     local dev Windows helper (Git-free, ZIP-based)
 test/                    vitest unit tests
 ```
 

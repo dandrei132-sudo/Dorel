@@ -68,8 +68,10 @@ function readLogTail(n: number): string[] {
  * /public, plus /api routes for status, chat, and — critically — the
  * pending-action approval queue that gates every irreversible/financial
  * tool call (see src/agent/pending-actions.ts and src/agent/tools.ts).
- * Binds to 127.0.0.1 by default; only override WEB_UI_HOST if you're
- * fronting this with your own TLS/auth (e.g. a tunnel or reverse proxy).
+ * Binds to 127.0.0.1 for local/dev runs, or 0.0.0.0 automatically when a
+ * platform-assigned PORT is detected (see src/config.ts) — a hosting
+ * platform's own TLS-terminating edge/load balancer sits in front of this
+ * in production, so the app itself only ever needs to speak plain HTTP.
  */
 export function startWebServer(deps: WebServerDeps): WebServerHandle {
   const { state: authState, generatedPassword } = loadOrCreateWebAuthState();
@@ -87,6 +89,13 @@ export function startWebServer(deps: WebServerDeps): WebServerHandle {
       if (client.readyState === client.OPEN) client.send(payload);
     }
   }
+
+  // Unauthenticated on purpose: hosting platforms probe this for liveness
+  // and never carry a session cookie. Reports process uptime only — no
+  // agent state, credits, or identity, since that's not for a prober.
+  app.get("/api/health", (_req: Request, res: Response) => {
+    res.json({ ok: true, uptimeSeconds: Math.round(process.uptime()) });
+  });
 
   app.post("/api/login", (req: Request, res: Response) => {
     const password = String(req.body?.password ?? "");

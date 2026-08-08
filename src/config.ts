@@ -2,6 +2,12 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
 
+// Most hosting platforms (Railway, Render, Fly.io, ...) inject PORT and
+// expect the app to bind 0.0.0.0. Presence of PORT is a reasonable signal
+// we're running hosted rather than on a developer's own machine, used
+// below to pick sane defaults without requiring extra configuration.
+const isHostedPlatform = Boolean(process.env.PORT);
+
 const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
   BASE_SEPOLIA_RPC_URL: z.string().url().default("https://sepolia.base.org"),
@@ -11,7 +17,12 @@ const envSchema = z.object({
   CONWAY_API_URL: z.string().optional(),
   WEB_UI_PASSWORD: z.string().optional(),
   WEB_UI_PORT: z.coerce.number().int().positive().default(4173),
-  WEB_UI_HOST: z.string().default("127.0.0.1"),
+  WEB_UI_HOST: z.string().default(isHostedPlatform ? "0.0.0.0" : "127.0.0.1"),
+  // Headless/hosted bootstrap: used in place of the interactive setup
+  // wizard when stdin isn't a TTY (see src/setup/wizard.ts).
+  AUTOMATON_NAME: z.string().optional(),
+  AUTOMATON_GENESIS_PROMPT: z.string().optional(),
+  AUTOMATON_CREATOR_ADDRESS: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -25,8 +36,13 @@ function loadEnv(): Env {
     AUTOMATON_HOME: process.env.AUTOMATON_HOME,
     CONWAY_API_URL: process.env.CONWAY_API_URL,
     WEB_UI_PASSWORD: process.env.WEB_UI_PASSWORD,
-    WEB_UI_PORT: process.env.WEB_UI_PORT || undefined,
+    // WEB_UI_PORT wins if set explicitly; otherwise fall back to the
+    // platform-assigned PORT; otherwise the schema default.
+    WEB_UI_PORT: process.env.WEB_UI_PORT || process.env.PORT || undefined,
     WEB_UI_HOST: process.env.WEB_UI_HOST || undefined,
+    AUTOMATON_NAME: process.env.AUTOMATON_NAME,
+    AUTOMATON_GENESIS_PROMPT: process.env.AUTOMATON_GENESIS_PROMPT,
+    AUTOMATON_CREATOR_ADDRESS: process.env.AUTOMATON_CREATOR_ADDRESS,
   });
 }
 

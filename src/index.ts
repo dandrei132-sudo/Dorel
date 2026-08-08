@@ -60,12 +60,30 @@ async function runAgent(): Promise<void> {
   });
 
   const web = startWebServer({ config, conway, skills, heartbeat, loop });
-  console.log(`Control panel: http://${env.WEB_UI_HOST}:${env.WEB_UI_PORT}`);
+  if (env.WEB_UI_HOST === "0.0.0.0") {
+    // Hosted mode: 0.0.0.0 isn't a browsable address itself, so print
+    // what's actually true (listening port) rather than a link that
+    // wouldn't work — the real URL is whatever domain the host assigns.
+    console.log(`Control panel listening on port ${env.WEB_UI_PORT} (all interfaces).`);
+  } else {
+    console.log(`Control panel: http://${env.WEB_UI_HOST}:${env.WEB_UI_PORT}`);
+  }
   if (web.generatedPassword) {
     console.log(`Control panel password (generated, shown once): ${web.generatedPassword}`);
     console.log(
       "Set WEB_UI_PASSWORD to use your own instead. This one is stored (hashed) in ~/.automaton/web-auth.json.",
     );
+  }
+
+  for (const signal of ["SIGTERM", "SIGINT"] as const) {
+    process.on(signal, () => {
+      // Hosting platforms send SIGTERM on redeploy/restart and expect a
+      // clean, prompt exit — stop the heartbeat and close the HTTP/WS
+      // server rather than letting the platform hard-kill mid-request.
+      console.log(`${signal} received, shutting down...`);
+      heartbeat.stop();
+      web.stop().finally(() => process.exit(0));
+    });
   }
 
   console.log(`${config.name} is running. Executing genesis prompt...`);
