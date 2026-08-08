@@ -15,7 +15,9 @@ This matters more than usual for a project like this, so it's stated plainly:
 
 ## Quick start
 
-**Windows, no command line needed:** download [`scripts/windows-install.bat`](scripts/windows-install.bat) (right-click the Raw button on GitHub → "Save link as") and double-click it. It installs Git and Node.js if they're missing (via `winget`), clones/updates the app, builds it, prompts for an Anthropic API key on first run, and starts it. Windows will show a SmartScreen warning since it's an unsigned script downloaded from the internet — click "More info" → "Run anyway". Re-run the same file any time to update and restart.
+**Windows, no command line needed:** you need [Node.js](https://nodejs.org) installed (just Node — no Git required for this path). Download the code as a ZIP from GitHub's "Code" → "Download ZIP" button (or directly: `https://github.com/dandrei132-sudo/Dorel/archive/refs/heads/claude/automaton-self-improving-ai-nlseal.zip`), extract it, and double-click [`START-HERE.bat`](START-HERE.bat) inside the extracted folder. It installs dependencies, builds, prompts for an Anthropic API key on first run, and starts the app. Windows will show a SmartScreen warning since it's an unsigned script — click "More info" → "Run anyway". Re-run the same file any time to restart.
+
+Already comfortable with Git? [`scripts/windows-install.bat`](scripts/windows-install.bat) does the same thing but also installs Git/Node via `winget` and clones the repo for you if you'd rather not download a ZIP.
 
 Everything else (macOS/Linux, or if you'd rather run the commands yourself on Windows):
 
